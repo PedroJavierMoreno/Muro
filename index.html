@@ -89,6 +89,13 @@ button.habit:hover{border-color:var(--ink)}
 .chip.no{border-color:var(--miss);color:var(--miss)}
 .chip.no[aria-pressed="true"]{color:#fff}
 .chips{display:flex;gap:6px}
+.chip.yes.auto{border-color:var(--done);color:var(--done)}
+.habit.av{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px 14px}
+.habit.av .box{margin-top:2px}
+.habit.av .chips{grid-column:2}
+.habit.av .chips button{flex:1;min-height:44px}
+.qty{width:5.6em;padding:6px 8px;font-size:1rem;font-weight:600;text-align:center;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.lr{display:flex;flex-wrap:wrap;gap:2px 14px;align-items:baseline}
 .empty{padding:18px;border:2px dashed var(--line);border-radius:6px;color:var(--muted)}
 textarea{width:100%;min-height:84px;padding:12px;border:1px solid var(--line);border-radius:6px;background:var(--surface);resize:vertical}
 label.l{display:block;margin:22px 0 6px;font-weight:600}
@@ -199,6 +206,8 @@ nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;backgrou
 nav.tabs button{flex:1;padding:14px 2px 12px;background:none;border:0;border-top:3px solid transparent;margin-top:-1px;font-weight:600;font-size:.8rem;color:var(--muted)}
 nav.tabs button[aria-current="page"]{color:var(--ink);border-top-color:var(--amber)}
 
+#upd{position:fixed;top:env(safe-area-inset-top,0px);left:0;right:0;z-index:30;display:flex;gap:12px;align-items:center;justify-content:center;background:var(--amber);color:var(--amber-ink);padding:8px 12px;font-weight:600}
+#upd button{background:var(--ink);color:var(--bg);border:0;border-radius:4px;padding:8px 14px;min-height:40px;font-weight:800}
 #toast{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom,0px));transform:translate(-50%,30px);opacity:0;pointer-events:none;background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:6px;font-weight:600;transition:all .3s;max-width:90vw;text-align:center;z-index:20}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #undo{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translate(-50%,30px);opacity:0;visibility:hidden;display:flex;gap:14px;align-items:center;background:var(--ink);color:var(--bg);padding:6px 6px 6px 16px;border-radius:6px;font-weight:600;transition:all .3s;max-width:92vw;z-index:21}
@@ -211,6 +220,7 @@ nav.tabs button[aria-current="page"]{color:var(--ink);border-top-color:var(--amb
 <div class="wrap" id="app"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="undo" role="status" aria-live="polite"></div>
+<div id="upd" role="status" hidden><span>Hay una versión nueva.</span><button type="button" data-reload>Actualizar</button></div>
 
 <script>
 /* ============ Utilidades ============ */
@@ -247,7 +257,7 @@ function fresh(){return migrate({start:today(),threshold:0.8,log:{},habits:[
 function migrate(o){
   if(!o)return null;
   o.ver=3;o.threshold=o.threshold||0.8;o.start=o.start||today();o.log=o.log||{};
-  o.claimed=o.claimed||{};o.unlocked=o.unlocked||{};o.theme=o.theme||'auto';o.maxRest=o.maxRest||2;
+  o.claimed=o.claimed||{};o.unlocked=o.unlocked||{};o.theme=o.theme||'auto';o.maxRest=o.maxRest||2;o.avoidFrom=o.avoidFrom||today();
   o.habits=(o.habits||[]).map(h=>{
     const x=Object.assign({type:'check',target:1,unit:'',step:1,days:ALLD.slice(),since:'',until:null},h);
     if(!Array.isArray(x.days)||!x.days.length)x.days=ALLD.slice();
@@ -288,13 +298,22 @@ function info(date){
   let dk=Object.keys(done),sk=Object.keys(slip);
   if(live){dk=dk.filter(k=>act.has(k));sk=sk.filter(k=>act.has(k))}
   const total=(live||!r)?sched(date).length:r.total;
-  const n=dk.length,base=dk.reduce((a,k)=>a+done[k],0),pen=sk.reduce((a,k)=>a+slip[k],0);
+  const explicit=dk.length;
+  let n=explicit,base=dk.reduce((a,k)=>a+done[k],0);
+  const pen=sk.reduce((a,k)=>a+slip[k],0);
+  /* "Evitar": en los días con actividad registrada, cuenta como logrado salvo que marques «Caí» */
+  const auto=[];
+  if(explicit>0&&date>=S.avoidFrom){
+    const sl=new Set(sk);
+    sched(date).forEach(h=>{if(h.type==='avoid'&&done[h.id]===undefined&&!sl.has(h.id))auto.push(h)});
+    n+=auto.length;base+=auto.reduce((a,h)=>a+h.xp,0);
+  }
   const ratio=total?Math.min(1,n/total):(n>0?1:0);
   const thr=(live||!r||r.thr===undefined)?S.threshold:r.thr;
-  const ok=n>0&&ratio>=thr;
+  const ok=explicit>0&&ratio>=thr;
   const rest=!!(r&&r.rest);
   const raw=ok?'ok':rest?'rest':(total===0&&n===0)?'free':'miss';
-  return IC[date]={done,keys:dk,slips:sk,n,base,pen,total,ratio,thr,ok,rest,raw,xp:base+(ok?BONUS:0)-pen};
+  return IC[date]={date,done,keys:dk,slips:sk,n,explicit,autoN:auto.length,autoSet:new Set(auto.map(h=>h.id)),base,pen,total,ratio,thr,ok,rest,raw,xp:base+(ok?BONUS:0)-pen};
 }
 /* Estado de cada día: ok, miss, rest (descanso), free (sin hábitos), shield (cubierto por escudo), open (hoy pendiente) */
 function timeline(){
@@ -336,7 +355,7 @@ function weekStats(ws){
     else if(st==='miss')run=0;
     if(r&&r.note&&r.note.trim())w.notes++;
     const seen={};let av=0;
-    inf.keys.forEach(k=>{const h=meta[k];if(h){seen[h.cat]=1;if(h.type==='avoid')av++}});
+    inf.keys.forEach(k=>{const h=meta[k];if(h){seen[h.cat]=1;if(h.type==='avoid')av++}});av+=inf.autoN;
     Object.keys(seen).forEach(c=>w.cat[c]=(w.cat[c]||0)+1);
     if(av>0&&inf.slips.length===0)w.clean++;
   }
@@ -389,7 +408,7 @@ function stats(){
     }
     p2=p1;p1=st;
     if(r&&r.note&&r.note.trim())notes++;
-    i.keys.forEach(k=>{if(types[k]==='count')counts++;if(types[k]==='avoid')avoids++});
+    i.keys.forEach(k=>{if(types[k]==='count')counts++;if(types[k]==='avoid')avoids++});avoids+=i.autoN;
   }
   for(let ws=weekStart(S.start);ws<=t;ws=addDays(ws,7)){
     let good=true,oks=0;
@@ -449,7 +468,7 @@ function periodStats(a,b){
     if(st==='ok'){P.ok++;run++;P.best=Math.max(P.best,run)}else if(st==='miss')run=0;
     const w=wdx(d);P.wd[w][0]+=i.ratio;P.wd[w][1]++;
     S.habits.forEach(h=>{
-      const e=i.done[h.id]!==undefined;
+      const e=i.done[h.id]!==undefined||i.autoSet.has(h.id);
       if(scheduled(h,d)||e){P.hab[h.id].s++;if(e)P.hab[h.id].d++}
     });
   }
@@ -473,8 +492,18 @@ function nextToast(){
   setTimeout(()=>{el.classList.remove('show');setTimeout(nextToast,300)},2300);
 }
 
+/* Render diferido: evita perder un toque cuando un campo de texto pierde el foco */
+let LR=null,needRender=false;
+function laterRender(){
+  clearTimeout(LR);
+  LR=setTimeout(()=>{
+    const a=document.activeElement;
+    if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)){needRender=true;return}
+    needRender=false;render();
+  },300);
+}
 /* ============ Acciones ============ */
-function mutate(fn,fk){
+function mutate(fn,fk,defer){
   if(sel>today())return;
   ic();const xp0=totalXP(),wasOk=info(sel).ok,lv0=levelOf(xp0);
   const r=ensure(sel);fn(r);if(sel===today())r.total=sched(sel).length;
@@ -482,7 +511,7 @@ function mutate(fn,fk){
   ic();
   const msgs=checkProgress();
   ic();const nowOk=info(sel).ok,lv1=levelOf(totalXP());
-  save();focusKey=fk||null;render();
+  save();focusKey=defer?null:(fk||null);if(defer)laterRender();else render();
   if(lv1>lv0)toast('¡Subes al nivel '+lv1+': '+rankOf(lv1)+'!');
   else if(!wasOk&&nowOk)toast('Día cumplido. Ladrillo colocado (+'+BONUS+' XP)');
   msgs.forEach(toast);
@@ -498,6 +527,15 @@ function bump(id,dir){
     r.vals[id]=v;
     if(v>=h.target)r.done[id]=h.xp;else delete r.done[id];
   },'c'+id+(dir>0?'p':'m'));
+}
+function setQty(id,raw){
+  const h=habit(id);if(!h)return;
+  let v=parseFloat(String(raw).replace(',','.'));
+  if(!isFinite(v)||v<0)v=0;
+  v=Math.round(v*100)/100;
+  const r0=S.log[sel];
+  if(((r0&&r0.vals[id])||0)===v){laterRender();return}
+  mutate(r=>{r.vals[id]=v;if(v>=h.target)r.done[id]=h.xp;else delete r.done[id]},null,true);
 }
 /* ---- Deshacer: una sola acción, se descarta si haces otro cambio o pasan 8 s ---- */
 function offerUndo(msg,snap){
@@ -562,11 +600,12 @@ function row(h,cur,r){
   const on=cur.done[h.id]!==undefined;
   if(h.type==='count'){
     const v=(r.vals&&r.vals[h.id])||0,p=Math.min(100,v/h.target*100);
-    return `<li><div class="habit${on?' on':''}"><span class="box">✓</span><span class="nm"><b>${esc(h.name)}</b><small>${num(v)} / ${num(h.target)} ${esc(h.unit)} · +${h.xp} XP al completar</small><span class="mini"><i style="width:${p}%"></i></span></span><span class="step"><button data-cnt="${h.id}" data-d="-1" data-k="c${h.id}m" aria-label="Restar a ${esc(h.name)}">−</button><button data-cnt="${h.id}" data-d="1" data-k="c${h.id}p" aria-label="Sumar a ${esc(h.name)}">+</button></span></div></li>`;
+    return `<li><div class="habit${on?' on':''}"><span class="box">✓</span><span class="nm"><b>${esc(h.name)}</b><small><input class="qty" type="number" inputmode="decimal" step="any" min="0" value="${v}" data-qty="${h.id}" aria-label="Cantidad de ${esc(h.name)}"> / ${num(h.target)} ${esc(h.unit)} · +${h.xp} XP al completar</small><span class="mini"><i style="width:${p}%"></i></span></span><span class="step"><button data-cnt="${h.id}" data-d="-1" data-k="c${h.id}m" aria-label="Restar a ${esc(h.name)}">−</button><button data-cnt="${h.id}" data-d="1" data-k="c${h.id}p" aria-label="Sumar a ${esc(h.name)}">+</button></span></div></li>`;
   }
   if(h.type==='avoid'){
-    const slipped=r.slip&&r.slip[h.id]!==undefined;
-    return `<li><div class="habit${on?' on':''}${slipped?' bad':''}"><span class="box">${slipped?'✕':'✓'}</span><span class="nm"><b>${esc(h.name)}</b><small>Hábito a evitar · +${h.xp} si lo evitas, −${h.xp} si caes</small></span><span class="chips"><button class="chip yes" aria-pressed="${on}" data-av="${h.id}" data-avk="ok" data-k="aok${h.id}">Evitado</button><button class="chip no" aria-pressed="${slipped}" data-av="${h.id}" data-avk="slip" data-k="aslip${h.id}">Caí</button></span></div></li>`;
+    const slipped=r.slip&&r.slip[h.id]!==undefined,auto=!on&&!slipped&&cur.autoSet.has(h.id);
+    const hint=cur.date>=S.avoidFrom?`Cuenta como evitado salvo que marques «Caí» (−${h.xp} XP)`:`Hábito a evitar · +${h.xp} si lo evitas, −${h.xp} si caes`;
+    return `<li><div class="habit av${on||auto?' on':''}${slipped?' bad':''}"><span class="box">${slipped?'✕':'✓'}</span><span class="nm"><b>${esc(h.name)}</b><small>${hint}</small></span><span class="chips"><button class="chip yes${auto?' auto':''}" aria-pressed="${on}" data-av="${h.id}" data-avk="ok" data-k="aok${h.id}">Evitado</button><button class="chip no" aria-pressed="${slipped}" data-av="${h.id}" data-avk="slip" data-k="aslip${h.id}">Caí</button></span></div></li>`;
   }
   return `<li><button class="habit${on?' on':''}" role="checkbox" aria-checked="${on}" data-toggle="${h.id}" data-k="t${h.id}"><span class="box">✓</span><span class="nm"><b>${esc(h.name)}</b></span><span class="pts">+${h.xp} XP</span></button></li>`;
 }
@@ -609,7 +648,7 @@ function viewHoy(){
     <button class="btn restbtn" data-rest data-k="rest">${restOn?'Quitar día de descanso':'Marcar día de descanso (enfermedad, viaje...)'}</button>
     <label class="l" for="note">Nota del día</label>
     <textarea id="note" maxlength="300" placeholder="¿Cómo ha ido? Escribe lo que quieras recordar (opcional)">${esc(r.note||'')}</textarea>
-    <p class="linkrow">${ms.length?`Misiones de la semana: ${doneMs} de ${ms.length} · <button class="back" data-tab="logros">Ver misiones</button><br>`:''}Escudos de racha: ${tl.shields} de 2${tl.used?` · usados: ${tl.used}`:''}</p>
+    <div class="linkrow">${ms.length?`<div class="lr"><span>Misiones de la semana: ${doneMs} de ${ms.length}</span><button class="back" data-tab="logros">Ver misiones</button></div>`:''}<div>Escudos de racha: ${tl.shields} de 2${tl.used?` · usados: ${tl.used}`:''}</div></div>
   </section>`;
 }
 function xpChart(){
@@ -753,6 +792,7 @@ function viewSet(){
       <div class="field" style="margin-top:12px"><label for="maxrest">Días de descanso por semana</label>
       <select id="maxrest">${[1,2,3].map(v=>`<option value="${v}"${S.maxRest===v?' selected':''}>${v}</option>`).join('')}</select></div>
       <p class="note">Un día de descanso no suma ni rompe la racha. Además ganas un escudo de racha cada 7 días cumplidos (máximo 2): se usa solo si fallas un día.</p>
+      <p class="note">Los hábitos «Evitar» cuentan como logrados en los días en que registras algo, salvo que marques «Caí». Esto vale desde ${fmtShort(S.avoidFrom)}; los días anteriores no cambian.</p>
       <div class="field" style="margin-top:12px"><label for="theme">Tema</label>
       <select id="theme">${[['auto','Automático'],['light','Claro'],['dark','Oscuro']].map(x=>`<option value="${x[0]}"${S.theme===x[0]?' selected':''}>${x[1]}</option>`).join('')}</select></div></div>
     <div class="sec"><h3>Copia de seguridad</h3>
@@ -807,6 +847,7 @@ function applyTheme(){
 document.addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
   const d=b.dataset;
+  if('reload' in d)return location.reload();
   if('undo' in d)return doUndo();
   if(d.tab){tab=d.tab;goTop();return render()}
   if(d.toggle)return toggle(d.toggle);
@@ -869,7 +910,8 @@ document.addEventListener('submit',e=>{
 });
 document.addEventListener('change',e=>{
   const el=e.target;
-  if(el.id==='thr'){S.threshold=Number(el.value);const m=checkProgress();save();render();toast('Cambio aplicado desde hoy. El pasado no se modifica.');m.forEach(toast)}
+  if(el.classList&&el.classList.contains('qty')){setQty(el.dataset.qty,el.value)}
+  else if(el.id==='thr'){S.threshold=Number(el.value);const m=checkProgress();save();render();toast('Cambio aplicado desde hoy. El pasado no se modifica.');m.forEach(toast)}
   else if(el.id==='maxrest'){S.maxRest=Number(el.value);save()}
   else if(el.id==='theme'){S.theme=el.value;save();applyTheme()}
   else if(el.id==='file'){const f=el.files&&el.files[0];if(!f)return;const r=new FileReader();r.onload=()=>importText(String(r.result));r.readAsText(f)}
@@ -879,6 +921,10 @@ document.addEventListener('change',e=>{
 document.addEventListener('input',e=>{
   if(e.target.id==='note'){if(sel>today())return;const r=ensure(sel);r.note=e.target.value.slice(0,300);if(sel===today())r.total=sched(sel).length;if(sel<S.start)S.start=sel;save()}
 });
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.target.classList&&e.target.classList.contains('qty')){e.preventDefault();e.target.blur()}
+});
+document.addEventListener('focusout',()=>{if(needRender)laterRender()});
 let lastDay=today();
 function rollover(){
   const t=today();
@@ -897,7 +943,15 @@ if(oldVer!==3){checkProgress(true)}
 save();
 render();
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
-  try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}
+  try{
+    const had=!!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      if(had){const u=document.getElementById('upd');if(u)u.hidden=false}
+    });
+    navigator.serviceWorker.register('sw.js').then(reg=>{
+      document.addEventListener('visibilitychange',()=>{if(!document.hidden)reg.update().catch(()=>{})});
+    }).catch(()=>{});
+  }catch(e){}
 }
 </script>
 </body>
